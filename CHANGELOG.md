@@ -1,3 +1,15 @@
+## 1.0.4 (2026-10-28)
+
+
+### Features
+
+* add `scoreFromOrderMs` queue option: when enabled the job score is exactly `orderMs` (`seq = 0`, no sequence counter), applied to single, repeating and auto-batched enqueues
+
+### Bug Fixes
+
+* write the job hash `score` as an exact integer string (`string.format('%.0f')`) instead of `tostring`, which kept only 14 significant digits and made retry / stalled recovery / promotion re-add jobs with a rounded score
+* `reserveBlocking`: when the atomic reserve fails, restore the group into `:ready` with the current head score instead of the popped (possibly stale) score; empty groups are not re-added
+
 ## [1.1.0](https://github.com/Openpanel-dev/groupmq/compare/v1.0.0...v1.1.0) (2025-11-26)
 
 

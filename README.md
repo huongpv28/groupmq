@@ -110,6 +110,7 @@ type QueueOptions = {
   orderingMaxWaitMultiplier?: number; // Max grace period multiplier for in-memory (default: 3)
   orderingGracePeriodDecay?: number;  // Grace period decay factor for in-memory (default: 1.0)
   orderingMaxBatchSize?: number;      // Max jobs to collect in batch for in-memory (default: 10)
+  scoreFromOrderMs?: boolean;       // Use orderMs as the exact job score, no seq counter (default: false)
 };
 
 type OrderingMethod = 'none' | 'scheduler' | 'in-memory';
@@ -627,6 +628,18 @@ This ensures:
 - Jobs with same `orderMs` process in submission order
 - Score is stable and sortable
 - Daily sequence reset prevents integer overflow
+
+**`scoreFromOrderMs: true`** replaces the composite score with the order value itself:
+
+```typescript
+score = orderMs   // seq = 0, the sequence counter is not incremented
+```
+
+Use it when `orderMs` is already a unique, monotonically increasing key (for example a database id), so that
+ordering inside a group never depends on how many jobs were enqueued before. The job hash stores `score` as
+an exact integer string and `seq = "0"`; retries, delayed promotion and stalled recovery re-add the job with that
+same score. Jobs with equal `orderMs` in the same group are ordered by Redis sorted-set rules, i.e.
+**lexicographically by jobId** (not by submission order), so keep `orderMs` unique per group if order matters.
 
 #### Concurrency Modes
 
