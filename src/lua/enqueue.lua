@@ -1,4 +1,5 @@
--- argv: ns, groupId, dataJson, maxAttempts, orderMs, delayUntil, jobId, keepCompleted, clientTimestamp, orderingDelayMs
+-- argv: ns, groupId, dataJson, maxAttempts, orderMs, delayUntil, jobId, keepCompleted, clientTimestamp, orderingDelayMs, scoreFromOrderMs
+-- scoreFromOrderMs ("1" to enable): score = orderMs, seq = 0, sequence counter untouched
 local ns = KEYS[1]
 local groupId = ARGV[1]
 local data = ARGV[2]
@@ -9,6 +10,7 @@ local jobId = ARGV[6]
 local keepCompleted = tonumber(ARGV[7]) or 0
 local clientTimestamp = tonumber(ARGV[8])
 local orderingDelayMs = tonumber(ARGV[9]) or 0
+local scoreFromOrderMs = ARGV[10] == "1"
 
 local readyKey = ns .. ":ready"
 local delayedKey = ns .. ":delayed"
@@ -78,14 +80,22 @@ local gZ = ns .. ":g:" .. groupId
 if not orderMs then
   orderMs = tonumber(redis.call("TIME")[1]) * 1000
 end
-local baseEpoch = 1704067200000
-local relativeMs = orderMs - baseEpoch
+local seq
+local score
+if scoreFromOrderMs then
+  -- Score is the caller-provided order value itself; no sequence counter
+  seq = 0
+  score = orderMs
+else
+  local baseEpoch = 1704067200000
+  local relativeMs = orderMs - baseEpoch
 
--- Use date-based sequence key to auto-reset daily (prevents max int overflow)
-local daysSinceEpoch = math.floor(orderMs / 86400000)
-local seqKey = ns .. ":seq:" .. daysSinceEpoch
-local seq = redis.call("INCR", seqKey)
-local score = relativeMs * 1000 + seq
+  -- Use date-based sequence key to auto-reset daily (prevents max int overflow)
+  local daysSinceEpoch = math.floor(orderMs / 86400000)
+  local seqKey = ns .. ":seq:" .. daysSinceEpoch
+  seq = redis.call("INCR", seqKey)
+  score = relativeMs * 1000 + seq
+end
 
 -- Get Redis server time for buffering logic (to be consistent with server time)
 local timeResult = redis.call("TIME")
@@ -103,7 +113,8 @@ redis.call("HMSET", jobKey,
   "seq", tostring(seq),
   "timestamp", tostring(timestamp),
   "orderMs", tostring(orderMs),
-  "score", tostring(score),
+  -- Exact integer string (tostring keeps only 14 significant digits)
+  "score", string.format("%.0f", score),
   "delayUntil", tostring(delayUntil)
 )
 
