@@ -5,8 +5,6 @@ import { Queue } from '../src';
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
 const BASE_EPOCH_MS = 1704067200000;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 describe('Queue scoreFromOrderMs option', () => {
   const prefix = `test:score-orderms:${Date.now()}`;
   let redis: Redis;
@@ -128,13 +126,15 @@ describe('Queue scoreFromOrderMs option', () => {
 
       const job = await q.reserve();
       expect(job?.id).toBe('42');
-      await q.retry('42', 50);
+      await q.retry('42', 5_000);
 
       expect((await jobHash(q, '42')).status).toBe('delayed');
       expect(await groupScore(q, 'g1', '42')).toBe(42);
 
-      await sleep(80);
-      await q.promoteDelayedJobsBounded(32, Date.now());
+      // Promote as if the back-off had elapsed (no wall-clock dependency)
+      expect(await q.promoteDelayedJobsBounded(32, Date.now() + 10_000)).toBe(
+        1,
+      );
 
       expect((await jobHash(q, '42')).score).toBe('42');
       expect(await groupScore(q, 'g1', '42')).toBe(42);
@@ -148,14 +148,16 @@ describe('Queue scoreFromOrderMs option', () => {
         data: {},
         jobId: '77',
         orderMs: 77,
-        delay: 50,
+        delay: 5_000,
       });
 
       expect((await jobHash(q, '77')).status).toBe('delayed');
       expect(await groupScore(q, 'g1', '77')).toBe(77);
 
-      await sleep(80);
-      await q.promoteDelayedJobsBounded(32, Date.now());
+      // Promote as if the delay had elapsed (no wall-clock dependency)
+      expect(await q.promoteDelayedJobsBounded(32, Date.now() + 10_000)).toBe(
+        1,
+      );
 
       expect(await groupScore(q, 'g1', '77')).toBe(77);
       expect(await readyScore(q, 'g1')).toBe(77);
@@ -169,8 +171,8 @@ describe('Queue scoreFromOrderMs option', () => {
       expect(job?.id).toBe('99');
       expect(await groupScore(q, 'g1', '99')).toBeNull();
 
-      await sleep(100);
-      const results = await q.checkStalledJobs(Date.now(), 0, 3);
+      // Check as if the visibility timeout had elapsed
+      const results = await q.checkStalledJobs(Date.now() + 10_000, 0, 3);
       expect(results).toEqual(['99', 'g1', 'recovered']);
 
       expect(await groupScore(q, 'g1', '99')).toBe(99);
