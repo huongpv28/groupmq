@@ -1467,10 +1467,11 @@ async reserveBlocking(timeoutSec = 5, blockUntil, blockingClient) {
 				  }
 				}
 			  
-				// Restore group to :ready
-				const jobCount = await this.r.zcard(groupKey);
-				if (jobCount > 0) {
-				  await this.r.zadd(readyKey, Number(score), groupId);
+				// Restore group to :ready with the CURRENT head score (the popped
+				// score may be stale if the group head changed); skip empty groups
+				const head = await this.r.zrange(groupKey, 0, 0, 'WITHSCORES');
+				if (head.length >= 2) {
+				  await this.r.zadd(readyKey, Number(head[1]), groupId);
 				  this.logger.debug(`E005 -- Restored group ${groupId} add `);
 				}
 			}
