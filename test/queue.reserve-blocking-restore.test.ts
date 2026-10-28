@@ -1,5 +1,13 @@
 import Redis from 'ioredis';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { Queue } from '../src';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
@@ -55,7 +63,7 @@ describe('reserveBlocking restore after a failed reserve', () => {
     vi.spyOn(q, 'reserve').mockResolvedValue(null);
     vi.spyOn(q, 'reserveAtomic').mockResolvedValue(null);
 
-    const job = await q.reserveBlocking(1);
+    const job = await q.reserveBlocking(1, undefined, undefined);
     expect(job).toBeNull();
     expect(await readyScore(q, 'g1')).toBe(200);
   });
@@ -67,7 +75,7 @@ describe('reserveBlocking restore after a failed reserve', () => {
     vi.spyOn(q, 'reserve').mockResolvedValue(null);
     vi.spyOn(q, 'reserveAtomic').mockResolvedValue(null);
 
-    const job = await q.reserveBlocking(1);
+    const job = await q.reserveBlocking(1, undefined, undefined);
     expect(job).toBeNull();
     expect(await readyScore(q, 'empty')).toBeNull();
   });

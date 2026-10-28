@@ -232,9 +232,7 @@ describe('Queue scoreFromOrderMs option', () => {
       expect(Number(h.score)).toBe(expected);
       expect(await groupScore(q, 'g1', 'a')).toBe(expected);
       expect(
-        await redis.get(
-          `${q.namespace}:seq:${Math.floor(orderMs / 86400000)}`,
-        ),
+        await redis.get(`${q.namespace}:seq:${Math.floor(orderMs / 86400000)}`),
       ).toBe(String(seq));
     });
 
