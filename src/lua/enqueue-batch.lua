@@ -1,10 +1,12 @@
 -- Batch enqueue multiple jobs atomically
--- argv: ns, jobsJson, keepCompleted, clientTimestamp, orderingDelayMs
+-- argv: ns, jobsJson, keepCompleted, clientTimestamp, orderingDelayMs, scoreFromOrderMs
+-- scoreFromOrderMs ("1" to enable): score = orderMs, seq = 0, sequence counter untouched
 local ns = KEYS[1]
 local jobsJson = ARGV[1]
 local keepCompleted = tonumber(ARGV[2]) or 0
 local clientTimestamp = tonumber(ARGV[3])
 local orderingDelayMs = tonumber(ARGV[4]) or 0
+local scoreFromOrderMs = ARGV[5] == "1"
 
 local jobs = cjson.decode(jobsJson)
 
@@ -42,9 +44,17 @@ for i, job in ipairs(jobs) do
   
   if uniqueSet then
     -- Generate sequence and score
-    local seq = redis.call("INCR", seqKey)
-    local relativeMs = orderMs - baseEpoch
-    local score = relativeMs * 1000 + seq
+    local seq
+    local score
+    if scoreFromOrderMs then
+      -- Score is the caller-provided order value itself; no sequence counter
+      seq = 0
+      score = orderMs
+    else
+      seq = redis.call("INCR", seqKey)
+      local relativeMs = orderMs - baseEpoch
+      score = relativeMs * 1000 + seq
+    end
     
     -- Create job hash
     local jobKey = ns .. ":job:" .. jobId
@@ -57,7 +67,8 @@ for i, job in ipairs(jobs) do
       "seq", tostring(seq),
       "timestamp", tostring(clientTimestamp),
       "orderMs", tostring(orderMs),
-      "score", tostring(score),
+      -- Exact integer string (tostring keeps only 14 significant digits)
+      "score", string.format("%.0f", score),
       "delayUntil", tostring(delayUntil)
     )
     

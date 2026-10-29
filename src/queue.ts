@@ -191,6 +191,23 @@ export type QueueOptions = {
         size?: number;
         maxWaitMs?: number;
       };
+
+  /**
+   * Use the job's `orderMs` as its exact group score instead of the default
+   * `(orderMs - 2024-01-01) * 1000 + seq` formula.
+   *
+   * When enabled, enqueue does not touch the per-day sequence counter, stores
+   * `seq = 0` on the job hash and sets `score = orderMs`. Ordering inside a
+   * group is then fully determined by `orderMs` (for example a monotonically
+   * increasing database id), independent of how many jobs were enqueued before.
+   *
+   * Jobs with equal `orderMs` in the same group are ordered by Redis sorted-set
+   * rules, i.e. lexicographically by jobId.
+   *
+   * @default false
+   * @example true // score = orderMs, no sequence counter
+   */
+  scoreFromOrderMs?: boolean;
 };
 
 /**
@@ -383,6 +400,7 @@ export class Queue<T = any> {
   private keepFailed: number;
   private schedulerLockTtlMs: number;
   public orderingDelayMs: number;
+  private scoreFromOrderMs: boolean;
   public name: string;
 
   // Internal tracking for adaptive behavior
@@ -426,6 +444,7 @@ export class Queue<T = any> {
     this.keepFailed = Math.max(0, opts.keepFailed ?? 0);
     this.schedulerLockTtlMs = opts.schedulerLockTtlMs ?? 1500;
     this.orderingDelayMs = opts.orderingDelayMs ?? 0;
+    this.scoreFromOrderMs = opts.scoreFromOrderMs ?? false;
 
     // Initialize auto-batching if enabled
     if (opts.autoBatch) {
@@ -563,6 +582,7 @@ export class Queue<T = any> {
         String(this.keepCompleted),
         String(now), // Pass client timestamp for accurate timing calculations
         String(this.orderingDelayMs), // Pass orderingDelayMs for staging logic
+        this.scoreFromOrderMs ? '1' : '0', // score = orderMs (no seq counter)
       ],
       1,
     );
@@ -642,6 +662,7 @@ export class Queue<T = any> {
           String(this.keepCompleted),
           String(now),
           String(this.orderingDelayMs),
+          this.scoreFromOrderMs ? '1' : '0',
         ],
         1,
       );
@@ -1446,10 +1467,11 @@ async reserveBlocking(timeoutSec = 5, blockUntil, blockingClient) {
 				  }
 				}
 			  
-				// Restore group to :ready
-				const jobCount = await this.r.zcard(groupKey);
-				if (jobCount > 0) {
-				  await this.r.zadd(readyKey, Number(score), groupId);
+				// Restore group to :ready with the CURRENT head score (the popped
+				// score may be stale if the group head changed); skip empty groups
+				const head = await this.r.zrange(groupKey, 0, 0, 'WITHSCORES');
+				if (head.length >= 2) {
+				  await this.r.zadd(readyKey, Number(head[1]), groupId);
 				  this.logger.debug(`E005 -- Restored group ${groupId} add `);
 				}
 			}
@@ -2266,6 +2288,9 @@ async reserveBlocking(timeoutSec = 5, blockUntil, blockingClient) {
             String(0),
             String(randomUUID()),
             String(this.keepCompleted),
+            '', // clientTimestamp: absent (Lua falls back to server time)
+            '0', // orderingDelayMs: absent (no staging, as before)
+            this.scoreFromOrderMs ? '1' : '0',
           ],
           1,
         );
